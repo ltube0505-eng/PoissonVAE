@@ -284,6 +284,7 @@ class ConfigTrainVAE(BaseConfigTrain):
 			temp_start: float = 1.0,
 			temp_stop: float = 0.05,
 			weight_decay: float = 0.0,
+			tensorboard_logdir: str | None = None,
 			**kwargs,
 	):
 		"""
@@ -301,6 +302,7 @@ class ConfigTrainVAE(BaseConfigTrain):
 		:param temp_start:
 		:param temp_stop:
 		:param weight_decay:
+		:param tensorboard_logdir: optional event directory for this run
 		:param kwargs:
 		"""
 		defaults = dict(
@@ -319,6 +321,7 @@ class ConfigTrainVAE(BaseConfigTrain):
 		kwargs = setup_kwargs(defaults, kwargs)
 		super(ConfigTrainVAE, self).__init__(**kwargs)
 		self.weight_decay = weight_decay
+		self.tensorboard_logdir = tensorboard_logdir
 		self.set_optim_kws(weight_decay=weight_decay)
 		self.set_scheduler_kws()  # reset scheduler kws
 		assert 0.0 <= kl_anneal_portion <= 1.0

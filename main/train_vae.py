@@ -407,10 +407,10 @@ class TrainerVAE(_BaseTrainerVAE):
 				self.stats['r_max'][gstep] = r_max.avg
 				self.stats['n_exp'][gstep] = self.model.n_exp.item()
 
-			# WANDB LOGGING
+			log_wandb = self.wandb_run is not None and gstep > 0
+			log_tensorboard = self.tensorboard_writer is not None
 			cond_write = (
-				gstep > 0 and
-				self.wandb_run is not None and
+				(log_wandb or log_tensorboard) and
 				gstep % self.cfg.log_freq == 0
 			)
 			if not cond_write:
@@ -426,7 +426,7 @@ class TrainerVAE(_BaseTrainerVAE):
 			if self.model.cfg.type == 'poisson':
 				to_write.update({
 					'coeffs/r_max': r_max.avg,
-					'coeffs/n_exp': self.model.n_exp,
+					'coeffs/n_exp': self.stats['n_exp'][gstep],
 				})
 			to_write.update({
 				'train/loss_kl': torch.mean(kl_batch).item(),
@@ -444,11 +444,20 @@ class TrainerVAE(_BaseTrainerVAE):
 			ratio = n_active / self.model.cfg.n_latents
 			to_write['train/n_active_ratio'] = ratio
 
-			# Log to WandB
-			wandb.log(to_write, step=gstep)
+			if log_wandb:
+				self.wandb_run.log(to_write, step=gstep)
+
+			if log_tensorboard:
+				to_write['train/nelbo'] = (
+					to_write['train/loss_mse'] + to_write['train/loss_kl'])
+				to_write['train/loss'] = loss.item()
+				self._log_tensorboard(to_write, gstep)
+				if self.model.cfg.type == 'poisson':
+					rates = tonp(dist.rate.detach().float())
+					self._log_posterior_rates(rates, 'train', gstep)
 
 			# reset avg meters
-			if gstep % 100 == 0:
+			if log_wandb and gstep % 100 == 0:
 				grads.reset()
 				nelbo.reset()
 
@@ -457,6 +466,33 @@ class TrainerVAE(_BaseTrainerVAE):
 			self.model.update_n(r_max.avg)
 
 		return nelbo.avg
+
+	def _log_tensorboard(self, scalars: dict, gstep: int):
+		for tag, value in scalars.items():
+			if np.isfinite(value):
+				self.tensorboard_writer.add_scalar(tag, value, gstep)
+
+	def _log_posterior_rates(self, rates: np.ndarray, split: str, gstep: int):
+		finite = np.isfinite(rates)
+		values = rates[finite]
+		prefix = f'{split}/posterior_rate'
+		scalars = {f'{prefix}/nonfinite': rates.size - values.size}
+		if values.size:
+			scalars.update({
+				f'{prefix}/min': values.min(),
+				f'{prefix}/mean': values.mean(dtype=np.float64),
+				f'{prefix}/max': values.max(),
+			})
+			if split == 'eval':
+				self.tensorboard_writer.add_histogram(
+					f'{prefix}/hist', values, gstep, bins=40)
+				for i in range(rates.shape[1]):
+					latent = rates[finite[:, i], i]
+					if latent.size:
+						tag = f'eval/posterior_rate_latent/z{i:03d}'
+						scalars[tag] = latent.mean(dtype=np.float64)
+
+		self._log_tensorboard(scalars, gstep)
 
 	@torch.inference_mode()
 	def validate(
@@ -511,9 +547,19 @@ class TrainerVAE(_BaseTrainerVAE):
 				for size, accuracy in df_summary['mean'].items():
 					to_write[f'knn/size={size}'] = accuracy
 
-			# Log scalars to WandB (only if wandb is active)
 			if self.wandb_run is not None:
-				wandb.log(to_write, step=gstep)
+				self.wandb_run.log(to_write, step=gstep)
+
+			if self.tensorboard_writer is not None:
+				n_active = np.count_nonzero(loss['kl_diag'] > 0.01)
+				self._log_tensorboard({
+					**to_write,
+					'eval/nelbo': to_write['eval/elbo'],
+					'eval/n_active': n_active,
+					'eval/n_active_ratio': n_active / self.model.cfg.n_latents,
+				}, gstep)
+				if self.model.cfg.type == 'poisson':
+					self._log_posterior_rates(etc['r*dr'], 'eval', gstep)
 
 			for k, v in to_write.items():
 				self.stats[k][gstep] = v
@@ -645,6 +691,7 @@ class TrainerVAE(_BaseTrainerVAE):
 			order: Sequence[int] = None, ):
 		if self.wandb_run is None:
 			return None
+		import wandb
 
 		freq = max(10, self.cfg.eval_freq * 5)
 		ep = int(gstep / len(self.dl_trn))
@@ -679,7 +726,7 @@ class TrainerVAE(_BaseTrainerVAE):
 		log_dict = {}
 		for name, f in figs.items():
 			log_dict[f'figs/{name}'] = wandb.Image(f)
-		wandb.log(log_dict, step=gstep)
+		self.wandb_run.log(log_dict, step=gstep)
 
 		# Close figs to free memory
 		for f in figs.values():
@@ -1098,7 +1145,13 @@ def _setup_args() -> argparse.Namespace:
 		default=False,
 	)
 	########################
-	# Wandb
+	# Experiment logging
+	parser.add_argument(
+		"--tensorboard_logdir",
+		help='directory for TensorBoard event files for this run',
+		default=None,
+		type=str,
+	)
 	########################
 	parser.add_argument(
 		"--wandb_project",
