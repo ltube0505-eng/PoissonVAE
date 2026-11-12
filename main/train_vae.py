@@ -902,6 +902,12 @@ def _setup_args() -> argparse.Namespace:
 		type=str,
 	)
 	parser.add_argument(
+		"--hard_fwd",
+		help='use straight-through hard Poisson counts at positive temperature',
+		default=False,
+		type=true_fn,
+	)
+	parser.add_argument(
 		"--exc_only",
 		help='only excitation?',
 		default=False,
@@ -966,6 +972,12 @@ def _setup_args() -> argparse.Namespace:
 		help='optimizer',
 		default='adamax_fast',
 		type=str,
+	)
+	parser.add_argument(
+		"--weight_decay",
+		help='optimizer weight decay',
+		default=0.0,
+		type=float,
 	)
 	# temp
 	parser.add_argument(

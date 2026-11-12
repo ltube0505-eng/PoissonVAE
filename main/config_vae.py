@@ -175,6 +175,7 @@ class ConfigPoisVAE(ConfigVAE):
 			prior_log_dist: str = 'uniform',
 			indicator_approx: str = 'sigmoid',
 			exc_only: bool = False,
+			hard_fwd: bool = False,
 			**kwargs,
 	):
 		assert prior_log_dist in _LOG_DIST_CHOICES, \
@@ -183,6 +184,7 @@ class ConfigPoisVAE(ConfigVAE):
 		self.prior_log_dist = prior_log_dist
 		self.prior_clamp = prior_clamp
 		self.exc_only = exc_only
+		self.hard_fwd = hard_fwd
 		super(ConfigPoisVAE, self).__init__(
 			**kwargs)
 
@@ -196,6 +198,8 @@ class ConfigPoisVAE(ConfigVAE):
 			str(self.prior_log_dist),
 			f"c({self.prior_clamp:0.2g})",
 		]
+		if self.hard_fwd:
+			special_name += ['hard']
 		if self.exc_only:
 			special_name += ['exc']
 		return '_'.join(special_name)
@@ -279,6 +283,7 @@ class ConfigTrainVAE(BaseConfigTrain):
 			temp_anneal_type: str = 'lin',
 			temp_start: float = 1.0,
 			temp_stop: float = 0.05,
+			weight_decay: float = 0.0,
 			**kwargs,
 	):
 		"""
@@ -295,6 +300,7 @@ class ConfigTrainVAE(BaseConfigTrain):
 		:param temp_anneal_type:
 		:param temp_start:
 		:param temp_stop:
+		:param weight_decay:
 		:param kwargs:
 		"""
 		defaults = dict(
@@ -312,7 +318,8 @@ class ConfigTrainVAE(BaseConfigTrain):
 		)
 		kwargs = setup_kwargs(defaults, kwargs)
 		super(ConfigTrainVAE, self).__init__(**kwargs)
-		self.set_optim_kws()  # reset optim kws
+		self.weight_decay = weight_decay
+		self.set_optim_kws(weight_decay=weight_decay)
 		self.set_scheduler_kws()  # reset scheduler kws
 		assert 0.0 <= kl_anneal_portion <= 1.0
 		assert 0.0 <= temp_anneal_portion <= 1.0

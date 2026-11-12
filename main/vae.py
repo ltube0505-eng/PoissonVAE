@@ -385,7 +385,7 @@ class PoissonVAE(BaseVAE):
 		# infer
 		dist, log_dr = self.infer(x)
 		# sample
-		spks = dist.rsample()
+		spks = dist.rsample(hard=self.cfg.hard_fwd)
 		# decode
 		y = self.decode(spks)
 		return dist, log_dr, spks, y

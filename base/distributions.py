@@ -47,7 +47,7 @@ class Poisson:
 		return self.rate
 
 	# noinspection PyTypeChecker
-	def rsample(self):
+	def rsample(self, hard: bool = False):
 		if self.temp == 0.0:
 			return self.sample()
 
@@ -73,6 +73,9 @@ class Poisson:
 		z = indicator.sum(0).to(
 			dtype=self.rate.dtype)
 
+		if hard:
+			z_hard = (times < 1.0).sum(0).to(dtype=z.dtype)
+			return z + (z_hard - z).detach()
 		return z
 
 	@torch.no_grad()

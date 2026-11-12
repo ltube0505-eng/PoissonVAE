@@ -280,11 +280,11 @@ class BaseTrainer(object):
 
 		# scheduler
 		if self.cfg.scheduler_type == 'cosine':
+			kws = self.cfg.scheduler_kws.copy()
+			# Convert the configured period in epochs to minibatch steps.
+			kws['T_max'] *= len(self.dl_trn)
 			self.optim_schedule = torch.optim.lr_scheduler.CosineAnnealingLR(
-				self.optim, **self.cfg.scheduler_kws)
-			total_steps = self.cfg.epochs * len(self.dl_trn)
-			warmup_steps = total_steps * self.cfg.warmup_portion
-			self.optim_schedule.T_max = total_steps - warmup_steps
+				self.optim, **kws)
 		elif self.cfg.scheduler_type == 'exponential':
 			self.optim_schedule = torch.optim.lr_scheduler.ExponentialLR(
 				self.optim, **self.cfg.scheduler_kws)
