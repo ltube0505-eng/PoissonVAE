@@ -2,7 +2,6 @@ from .generic import *
 import matplotlib
 import seaborn as sns
 from matplotlib import pyplot as plt
-from IPython.display import display as display_ipy
 from matplotlib.backends.backend_pdf import FigureCanvasPdf, PdfPages
 from matplotlib.colors import (
 	to_rgb, rgb2hex, Colormap,
@@ -611,6 +610,8 @@ def save_fig(
 						**kwargs,
 					)
 	if display:
+		from IPython.display import display as display_ipy
+
 		if isinstance(fig, list):
 			for f in fig:
 				display_ipy(f)
