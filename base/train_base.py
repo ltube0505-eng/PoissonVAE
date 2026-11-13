@@ -1,6 +1,6 @@
 from base.utils_model import *
+from contextlib import nullcontext
 import subprocess
-import wandb
 
 
 def _get_git_root() -> Optional[str]:
@@ -46,6 +46,7 @@ class BaseTrainer(object):
 		self.pbar = None
 
 		self.wandb_run = None
+		self.tensorboard_writer = None
 		self.logger = None
 		self.dl_trn = None
 		self.dl_vld = None
@@ -101,27 +102,40 @@ class BaseTrainer(object):
 			leave=True,
 			position=0,
 		)
-		for epoch in self.pbar:
-			avg_loss = self.iteration(epoch)
-			msg = ', '.join([
-				f"epoch # {epoch + 1:d}",
-				f"avg loss: {avg_loss:3f}",
-			])
-			self.pbar.set_description(msg)
-			if not save:
-				continue
-			if (epoch + 1) % self.cfg.chkpt_freq == 0:
-				self.save(
-					checkpoint=epoch + 1,
-					path=self.model.chkpt_dir,
-				)
-			if (epoch + 1) % self.cfg.eval_freq == 0:
-				gstep = (epoch + 1) * len(self.dl_trn)
-				_ = self.validate(gstep)
+		try:
+			with self._open_tensorboard(epochs, fresh_fit) as self.tensorboard_writer:
+				for epoch in self.pbar:
+					avg_loss = self.iteration(epoch)
+					msg = ', '.join([
+						f"epoch # {epoch + 1:d}",
+						f"avg loss: {avg_loss:3f}",
+					])
+					self.pbar.set_description(msg)
+					if not save:
+						continue
+					if (epoch + 1) % self.cfg.chkpt_freq == 0:
+						self.save(
+							checkpoint=epoch + 1,
+							path=self.model.chkpt_dir,
+						)
+					if (epoch + 1) % self.cfg.eval_freq == 0:
+						gstep = (epoch + 1) * len(self.dl_trn)
+						_ = self.validate(gstep)
+		finally:
+			self.tensorboard_writer = None
 
 		if self.wandb_run is not None:
-			wandb.finish()
+			self.wandb_run.finish()
 		return
+
+	def _open_tensorboard(self, epochs: range, fresh_fit: bool):
+		log_dir = getattr(self.cfg, 'tensorboard_logdir', None)
+		if log_dir is None:
+			return nullcontext()
+		from torch.utils.tensorboard import SummaryWriter
+
+		purge_step = None if fresh_fit else epochs.start * len(self.dl_trn)
+		return SummaryWriter(log_dir=log_dir, purge_step=purge_step, flush_secs=15)
 
 	def iteration(self, epoch: int = 0):
 		raise NotImplementedError
@@ -137,6 +151,7 @@ class BaseTrainer(object):
 		no_wandb = getattr(self.cfg, 'no_wandb', False)
 		if no_wandb:
 			return
+		import wandb
 
 		# 1. Prepare Config
 		run_config = {}
@@ -280,11 +295,11 @@ class BaseTrainer(object):
 
 		# scheduler
 		if self.cfg.scheduler_type == 'cosine':
+			kws = self.cfg.scheduler_kws.copy()
+			# Convert the configured period in epochs to minibatch steps.
+			kws['T_max'] *= len(self.dl_trn)
 			self.optim_schedule = torch.optim.lr_scheduler.CosineAnnealingLR(
-				self.optim, **self.cfg.scheduler_kws)
-			total_steps = self.cfg.epochs * len(self.dl_trn)
-			warmup_steps = total_steps * self.cfg.warmup_portion
-			self.optim_schedule.T_max = total_steps - warmup_steps
+				self.optim, **kws)
 		elif self.cfg.scheduler_type == 'exponential':
 			self.optim_schedule = torch.optim.lr_scheduler.ExponentialLR(
 				self.optim, **self.cfg.scheduler_kws)

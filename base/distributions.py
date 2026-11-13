@@ -7,7 +7,6 @@ class Poisson:
 			self,
 			log_rate: torch.Tensor,
 			temp: float = 0.0,
-			clamp: float | None = None,
 			indicator_approx: str = 'sigmoid',
 			n_exp: int | str = 'infer',
 			n_exp_p: float = 1e-3,
@@ -16,11 +15,7 @@ class Poisson:
 		assert indicator_approx in _INDICATOR_FNS
 		self.indicator_approx = indicator_approx
 		self.temp = temp
-		self.clamp = clamp
 		# setup rate & exp dist
-		if self.clamp is not None:
-			log_rate = softclamp_upper(
-				log_rate, self.clamp)
 		eps = torch.finfo(torch.float32).eps
 		self.rate = torch.exp(log_rate) + eps
 		self._exp = dists.Exponential(self.rate)
@@ -52,7 +47,7 @@ class Poisson:
 		return self.rate
 
 	# noinspection PyTypeChecker
-	def rsample(self):
+	def rsample(self, hard: bool = False):
 		if self.temp == 0.0:
 			return self.sample()
 
@@ -78,6 +73,9 @@ class Poisson:
 		z = indicator.sum(0).to(
 			dtype=self.rate.dtype)
 
+		if hard:
+			z_hard = (times < 1.0).sum(0).to(dtype=z.dtype)
+			return z + (z_hard - z).detach()
 		return z
 
 	@torch.no_grad()
@@ -230,16 +228,8 @@ def compute_n_exp(rate: float, p: float = 1e-6):
 	return int(n_exp)
 
 
-def softclamp(x: torch.Tensor, upper: float, lower: float = 0.0):
-	return lower + F.softplus(x - lower) - F.softplus(x - upper)
-
-
 def softclamp_sym(x: torch.Tensor, c: float):
 	return x.div(c).tanh_().mul(c)
-
-
-def softclamp_upper(x: torch.Tensor, c: float):
-	return c - F.softplus(c - x)
 
 
 def hard_sigmoid(x: torch.Tensor) -> torch.Tensor:

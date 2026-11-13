@@ -1,6 +1,6 @@
 from base.common import *
 from base.distributions import (
-	dists, softclamp, softclamp_upper,
+	dists,
 	Normal, Laplace, Poisson, Categorical,
 )
 from figures.imgs import plot_weights
@@ -385,7 +385,7 @@ class PoissonVAE(BaseVAE):
 		# infer
 		dist, log_dr = self.infer(x)
 		# sample
-		spks = dist.rsample()
+		spks = dist.rsample(hard=self.cfg.hard_fwd)
 		# decode
 		y = self.decode(spks)
 		return dist, log_dr, spks, y
@@ -400,13 +400,11 @@ class PoissonVAE(BaseVAE):
 		log_r = self.log_rate.expand(len(x), -1)
 		log_dr = self.encode(x)
 		if self.cfg.exc_only:
-			log_dr = softclamp(log_dr, 10.0, 0)
-		else:
-			log_dr = softclamp_upper(log_dr, 10.0)
+			log_dr = F.softplus(log_dr)
 		if ablate is not None:
 			log_dr[:, ablate] = 0.0
 		dist = self.Dist(
-			log_rate=softclamp_upper(log_r + log_dr, 5.0),
+			log_rate=log_r + log_dr,
 			indicator_approx=self.cfg.indicator_approx,
 			n_exp=self.n_exp,
 			n_exp_p=1e-3,
